@@ -1,4 +1,4 @@
-transformers==4.20.0
+transformers==4.26.1
 datasets>=2.2.0
 jsonlines
 numpy

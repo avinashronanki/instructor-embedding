@@ -13,7 +13,7 @@ import nltk  # Here to have a nice missing dependency error message early on
 
 import transformers
 from filelock import FileLock
-from instructor import INSTRUCTOR
+from InstructorEmbedding.instructor import INSTRUCTOR
 from transformers import (
     AutoTokenizer,
     DataCollatorForSeq2Seq,
@@ -31,8 +31,7 @@ from transformers.utils import check_min_version, is_offline_mode
 from torch.utils.data import Dataset, SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 from transformers.utils.versions import require_version
-from datasets import Dataset,DatasetDict
-
+from datasets import Dataset, DatasetDict
 
 check_min_version("4.20.0.dev0")
 
@@ -52,6 +51,7 @@ except (LookupError, OSError):
 
 MULTILINGUAL_TOKENIZERS = [MBartTokenizer, MBartTokenizerFast, MBart50Tokenizer, MBart50TokenizerFast]
 
+
 def has_length(dataset):
     """
     Checks if the dataset implements __len__() and it doesn't raise an error
@@ -62,8 +62,9 @@ def has_length(dataset):
         # TypeError: len() of unsized object
         return False
 
+
 class InstructorTrainer(Seq2SeqTrainer):
-    def _get_train_sampler(self) :
+    def _get_train_sampler(self):
         if self.train_dataset is None or not has_length(self.train_dataset):
             return None
 
@@ -93,8 +94,8 @@ class InstructorTrainer(Seq2SeqTrainer):
 
     def compute_loss(self, model, inputs, return_outputs=False):
         for task_id in inputs['task_id']:
-            assert task_id==inputs['task_id'][0],f"Examples in the same batch should come from the same task, " \
-                                                 f"but task {task_id} and task {inputs['task_id'][0]} are found"
+            assert task_id == inputs['task_id'][0], f"Examples in the same batch should come from the same task, " \
+                                                    f"but task {task_id} and task {inputs['task_id'][0]} are found"
         cur_results = {}
         for k in ['query', 'pos', 'neg']:
             cur_inputs = {
@@ -148,6 +149,7 @@ class InstructorTrainer(Seq2SeqTrainer):
         loss += nn.CrossEntropyLoss()(all_another_scores, labels_another)
 
         return loss
+
 
 @dataclass
 class ModelArguments:
@@ -359,6 +361,7 @@ class DataTrainingArguments:
             )
         },
     )
+
     def __post_init__(self):
         pass
 
@@ -392,7 +395,7 @@ def main():
     training_args.cl_temperature = data_args.cl_temperature
     training_args.remove_unused_columns = False
     if not os.path.isdir(data_args.output_dir):
-        os.makedirs(data_args.output_dir,exist_ok=True)
+        os.makedirs(data_args.output_dir, exist_ok=True)
 
     # Setup logging
     logging.basicConfig(
@@ -440,7 +443,7 @@ def main():
     total_n = len(old_train_examples_raw)
     real_batch_size = max(training_args.per_device_train_batch_size,
                           training_args.per_device_train_batch_size * torch.cuda.device_count())
-    print('real_batch_size: ', real_batch_size,training_args.per_device_train_batch_size,torch.cuda.device_count())
+    print('real_batch_size: ', real_batch_size, training_args.per_device_train_batch_size, torch.cuda.device_count())
     for idx in range(0, total_n, real_batch_size):
         local_task_name = old_train_examples_raw[idx]['task_id']
         cur_batch = []
@@ -455,8 +458,8 @@ def main():
         if include_batch and len(cur_batch) == real_batch_size:
             train_examples_raw.append(cur_batch)
     random.shuffle(train_examples_raw)
-    if data_args.max_examples is not None and len(train_examples_raw*real_batch_size)>data_args.max_examples:
-        train_examples_raw = train_examples_raw[:int(data_args.max_examples/real_batch_size)]
+    if data_args.max_examples is not None and len(train_examples_raw * real_batch_size) > data_args.max_examples:
+        train_examples_raw = train_examples_raw[:int(data_args.max_examples / real_batch_size)]
     train_examples_raw_batch = train_examples_raw
     train_examples_raw = []
     for b in train_examples_raw_batch:
@@ -465,27 +468,27 @@ def main():
     if data_args.debug_mode:
         train_examples_raw = train_examples_raw[:int(data_args.debug_mode)]
 
-    train_examples = {'query':[],'pos':[],'neg':[],'task_id':[]}
+    train_examples = {'query': [], 'pos': [], 'neg': [], 'task_id': []}
     total_train_num = len(train_examples_raw)
     for i in range(total_train_num):
         cur_e = train_examples_raw[i]
-        for k in ['query','pos','neg']:
+        for k in ['query', 'pos', 'neg']:
             for s in cur_e[k][:-1]:
                 assert not '!@#$%^&**!@#$%^&**' in s
             cur_e[k][-1] = str(cur_e[k][-1])
             if not data_args.add_prompt_to_document:
                 cur_e[k][0] = ''
-            assert cur_e[k][0].startswith('Represent ') or cur_e[k][0]==''
+            assert cur_e[k][0].startswith('Represent ') or cur_e[k][0] == ''
             train_examples[k].append('!@#$%^&**!@#$%^&**'.join(cur_e[k]))
         train_examples['task_id'].append(cur_e['task_id'])
-    raw_datasets = DatasetDict({'train':Dataset.from_dict(train_examples)})
+    raw_datasets = DatasetDict({'train': Dataset.from_dict(train_examples)})
 
     model = INSTRUCTOR(real_name_or_path, cache_folder=model_args.cache_dir)
     column_names = raw_datasets["train"].column_names
 
     def preprocess_function(examples):
         all_tokenized = None
-        for key in ['query','pos','neg']:
+        for key in ['query', 'pos', 'neg']:
             num = len(examples[key])
             contexts = []
             concatenated_input_texts = []
@@ -496,8 +499,10 @@ def main():
                 concatenated_input_texts.append(''.join(splits))
                 assert isinstance(contexts[-1], str)
                 assert isinstance(concatenated_input_texts[-1], str)
-            tokenized = tokenizer(concatenated_input_texts,padding='max_length', truncation='longest_first', return_tensors="pt", max_length=data_args.max_source_length)
-            context_tok = tokenizer(contexts,padding='max_length', truncation='longest_first', return_tensors="pt", max_length=data_args.max_source_length)
+            tokenized = tokenizer(concatenated_input_texts, padding='max_length', truncation='longest_first',
+                                  return_tensors="pt", max_length=data_args.max_source_length)
+            context_tok = tokenizer(contexts, padding='max_length', truncation='longest_first', return_tensors="pt",
+                                    max_length=data_args.max_source_length)
             tokenized['context_masks'] = torch.sum(context_tok['attention_mask'], dim=1)
             tokenized['context_masks'] = tokenized['context_masks'] - 1
             for my_idx in range(len(tokenized['context_masks'])):
